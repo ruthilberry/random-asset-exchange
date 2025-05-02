@@ -31,6 +31,7 @@ class WAARule(TransactionRule):
 
     The richer agent wins with probability:
         p_rich = 0.5 + zeta * Δw / (2 * (w_i + w_j)),  clipped to [0,1].
+    Here zeta represents zeta/sqrt(gamma), following standard notation.
     """
 
     def __init__(self, zeta: float):
@@ -52,22 +53,27 @@ class WAARule(TransactionRule):
 
 
 class Taxation:
-    """Pair‑wise flat redistribution (rate chi)."""
+    """Pair‑wise flat redistribution (rate chi).
+        The mean_wealth value is stored to avoid 
+        computing it repeatedly"""
 
-    def __init__(self, chi: float):
+    def __init__(self, chi: float, mean_wealth: float):
         self.chi = float(chi)
+        self.mean_wealth = mean_wealth
 
-    def apply(self, wealth: float, mean_wealth: float):
-        return self.chi * (mean_wealth - wealth) # cheaper than redistributing among everyone, progressive tax: chi depends on wealth wrt mean wealth
+    def apply(self, wealth: float):
+        return self.chi * (self.mean_wealth - wealth)
 
 
 class YardSaleModel:
-    """Implements baseline YSM (sec. 2a) and extensions (sec. 2b)."""
+    """Implements baseline YSM and the Extended YSM (EYSM).
+       For simplicity, we choose 
+       dt = 1, f = sqrt(gamma * dt), zeta = zeta/sqrt(gamma) """
 
     def __init__(
         self,
         n_agents: int = 10_000,
-        initial_wealth=1.0,
+        initial_wealth=1.0, # Admits scalar or array of initial wealths
         f: float = 0.1,
         transaction_rule: TransactionRule | None = None,
         taxation: Taxation | None = None,
@@ -86,7 +92,7 @@ class YardSaleModel:
                 raise ValueError("initial_wealth size mismatch.")
             self.agents = w.copy()
 
-        self.rule = transaction_rule or FairCoinRule()
+        self.transaction_rule = transaction_rule or FairCoinRule()
         self.tax = taxation
 
     # --- Diagnostics -----------------------------------------------------
@@ -102,25 +108,28 @@ class YardSaleModel:
     # --- Core dynamics ----------------------------------------------------
     def _exchange(self, i, j):
         w_i, w_j = self.agents[i], self.agents[j]
-        dw = self.f * min(w_i, w_j) 
-        sgn = self.rule.outcome(w_i, w_j)       # +1 wins i
+        poorer = min(w_i, w_j)
+        dw = self.f * poorer
 
-        if sgn == 1:
-            self.agents[j] -= dw
-            self.agents[i] += (1.0 - self.tau) * dw
-            self.treasury   += self.tau * dw
-        else:
-            self.agents[i] -= dw
-            self.agents[j] += (1.0 - self.tau) * dw
-            self.treasury   += self.tau * dw
+        sgn = self.rule.outcome(w_i, w_j)
 
+        self.agents[i] += sgn * dw
+        self.agents[j] -= sgn * dw
 
     def _redistribute(self, i: int, j: int):
         if self.tax is None or self.tax.chi == 0.0:
             return
         mean_w = self.agents.mean()
-        self.agents[i] += self.tax.apply(self.agents[i], mean_w)
-        self.agents[j] += self.tax.apply(self.agents[j], mean_w)
+        self.agents[i] += self.tax.apply(self.agents[i])
+        self.agents[j] += self.tax.apply(self.agents[j])
+
+    def _apply_wealth_tax(self):
+        if self.omega == 0.0:
+            return
+        tax = self.omega * self.agents
+        self.agents -= tax
+        self.treasury += tax.sum()
+
 
     def _apply_wealth_tax(self):
         if self.omega == 0.0:
@@ -139,7 +148,7 @@ class YardSaleModel:
             self._exchange(i, j)
             self._redistribute(i, j)
 
-    def run(self, n_steps: int = 1_000, record_interval: int = 100):
+    def run(self, n_steps: int = 1000, record_interval: int = 100):
         history = []
         for t in range(1, n_steps + 1):
             self.step()
