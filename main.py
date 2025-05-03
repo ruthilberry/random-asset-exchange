@@ -1,1 +1,156 @@
-print("Hello World")
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class Agent:
+    """Represents an economic agent with a single attribute: wealth."""
+    __slots__ = ("wealth",)
+
+    def __init__(self, wealth: float):
+        self.wealth = float(wealth)
+
+
+class TransactionRule:
+    """Abstract base class for a rule that decides the outcome of transactions."""
+
+    def outcome(self, w_i: float, w_j: float) -> int:
+        """Return +1 if i wins, -1 if j wins."""
+        raise NotImplementedError
+
+
+class FairCoinRule(TransactionRule):
+    """Both agents win with probability 1/2 irrespective of their wealth."""
+
+    def outcome(self, *_):
+        return 1 if np.random.rand() < 0.5 else -1
+
+
+class WAARule(TransactionRule):
+    """Wealth‑Attained Advantage (WAA) rule.
+
+    The richer agent wins with probability:
+        p_rich = 0.5 + zeta * Δw / (2 * (w_i + w_j)),  clipped to [0,1].
+    """
+
+    def __init__(self, zeta: float):
+        self.zeta = float(zeta)
+
+    def outcome(self, w_i: float, w_j: float):
+        if w_i == w_j:
+            return 1 if np.random.rand() < 0.5 else -1
+
+        rich_is_i = w_i > w_j
+        delta = abs(w_i - w_j)
+        p_rich = 0.5 + self.zeta * delta / (2 * (w_i + w_j))
+        p_rich = np.clip(p_rich, 0.0, 1.0)
+
+        if np.random.rand() < p_rich:
+            return 1 if rich_is_i else -1
+        else:
+            return -1 if rich_is_i else 1
+
+
+class Taxation:
+    """Pair‑wise flat redistribution (rate chi)."""
+
+    def __init__(self, chi: float):
+        self.chi = float(chi)
+
+    def apply(self, wealth: float, mean_wealth: float):
+        return self.chi * (mean_wealth - wealth)
+
+
+class YardSaleModel:
+    """Implements baseline YSM (sec. 2a) and extensions (sec. 2b)."""
+
+    def __init__(
+        self,
+        n_agents: int = 10_000,
+        initial_wealth=1.0,
+        f: float = 0.1,
+        transaction_rule: TransactionRule | None = None,
+        taxation: Taxation | None = None,
+    ):
+        self.n_agents = n_agents
+        self.f = float(f)
+
+        if isinstance(initial_wealth, (float, int)):
+            self.agents = np.full(n_agents, float(initial_wealth))
+        else:
+            w = np.asarray(initial_wealth, dtype=float)
+            if w.size != n_agents:
+                raise ValueError("initial_wealth size mismatch.")
+            self.agents = w.copy()
+
+        self.rule = transaction_rule or FairCoinRule()
+        self.tax = taxation
+
+    # --- Diagnostics -----------------------------------------------------
+    def gini(self) -> float:
+        w = np.sort(self.agents)
+        n = w.size
+        cum = np.cumsum(w)
+        return (n + 1 - 2 * np.sum(cum) / cum[-1]) / n
+
+    def wealth_distribution(self):
+        return self.agents.copy()
+
+    # --- Core dynamics ----------------------------------------------------
+    def _exchange(self, i: int, j: int):
+        w_i, w_j = self.agents[i], self.agents[j]
+        poorer = min(w_i, w_j)
+        dw = self.f * poorer
+
+        sgn = self.rule.outcome(w_i, w_j)
+
+        self.agents[i] += sgn * dw
+        self.agents[j] -= sgn * dw
+
+    def _redistribute(self, i: int, j: int):
+        if self.tax is None or self.tax.chi == 0.0:
+            return
+        mean_w = self.agents.mean()
+        self.agents[i] += self.tax.apply(self.agents[i], mean_w)
+        self.agents[j] += self.tax.apply(self.agents[j], mean_w)
+
+    def step(self, n_pairs: int = None):
+        n_pairs = n_pairs or self.n_agents
+        for _ in range(n_pairs):
+            i, j = np.random.randint(0, self.n_agents, 2)
+            if i == j:
+                continue
+            self._exchange(i, j)
+            self._redistribute(i, j)
+
+    def run(self, n_steps: int = 1_000, record_interval: int = 100):
+        history = []
+        for t in range(1, n_steps + 1):
+            self.step()
+            if t % record_interval == 0:
+                history.append((t, self.gini()))
+        return np.array(history)
+
+
+# ----------------------------- Demo ---------------------------------------
+if __name__ == "__main__":
+    np.random.seed(42)
+
+    base = YardSaleModel(n_agents=1_000, f=0.1)
+    hist_base = base.run(n_steps=1_000, record_interval=50)
+
+    ext = YardSaleModel(
+        n_agents=1_000,
+        f=0.1,
+        transaction_rule=WAARule(zeta=0.2),
+        taxation=Taxation(chi=0.05),
+    )
+    hist_ext = ext.run(n_steps=1_000, record_interval=50)
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(hist_base[:, 0], hist_base[:, 1], label="Baseline YSM")
+    plt.plot(hist_ext[:, 0], hist_ext[:, 1], label="Extended YSM")
+    plt.xlabel("Iteration")
+    plt.ylabel("Gini coefficient")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

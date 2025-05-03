@@ -110,11 +110,16 @@ class YardSaleModel:
         w_i, w_j = self.agents[i], self.agents[j]
         poorer = min(w_i, w_j)
         dw = self.f * poorer
+        sgn = self.transaction_rule.outcome(w_i, w_j)
 
-        sgn = self.rule.outcome(w_i, w_j)
-
-        self.agents[i] += sgn * dw
-        self.agents[j] -= sgn * dw
+        if sgn == 1:
+            self.agents[i] += (1 - self.tau) * dw
+            self.agents[j] -= dw
+            self.treasury += self.tau * dw
+        else:
+            self.agents[i] -= dw
+            self.agents[j] += (1 - self.tau) * dw
+            self.treasury += self.tau * dw
 
     def _redistribute(self, i: int, j: int):
         if self.tax is None or self.tax.chi == 0.0:
@@ -147,6 +152,7 @@ class YardSaleModel:
                 continue
             self._exchange(i, j)
             self._redistribute(i, j)
+    # decidir on s'aplica wealth tax
 
     def run(self, n_steps: int = 1000, record_interval: int = 100):
         history = []
