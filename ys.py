@@ -127,7 +127,6 @@ class YardSaleModel:
     def _redistribute(self, i: int, j: int):
         if self.tax is None or self.tax.chi == 0.0:
             return
-        mean_w = self.agents.mean()
         self.agents[i] += self.tax.apply(self.agents[i])
         self.agents[j] += self.tax.apply(self.agents[j])
 
@@ -164,17 +163,3 @@ class YardSaleModel:
             if t % record_interval == 0:
                 history.append((t, self.gini()))
         return np.array(history)
-
-
-# quantes steps perque canvii distribucio, fer gif
-# taxacio 0, 5, 10, 20, 40, 80
-# iva? wealth tax
-# iva, aduanas, 
-# intrinsecament liquid
-# graduacions liquiditat
-# herencia? 
-# tipus interes mes baix que pib o no?
-# tipus interes efectiu mes alt que el pib 
-# wealth tax io toring tax
-# liquiditat absoluta perden inflacio, bons, accions, sense derivats 
-# islm keynes diners i 1 be financer, 2 bens gradients liquidat 
