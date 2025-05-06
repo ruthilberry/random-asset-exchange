@@ -135,4 +135,4 @@ class YardSaleModel:
             self.step()
             if t % record_interval == 0:
                 history.append((t, self.gini()))
-        return np.array(history)
+        return np.array(history), self.copy()
