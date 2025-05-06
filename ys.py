@@ -77,9 +77,12 @@ class YardSaleModel:
         f: float = 0.1,
         transaction_rule: TransactionRule | None = None,
         taxation: Taxation | None = None,
+        omega=0.0, # wealth tax rate, before any trade, agent loses fraction omega of their wealth
+        tau=0.0, # Tobin tax rate per trade, when dw moves from loser to winner the winner keeps only (1-tau) * dw and the rest goes to the treasury
     ):
         self.n_agents = n_agents
         self.f = float(f)
+        self.treasury = 0.0
 
         if isinstance(initial_wealth, (float, int)):
             self.agents = np.full(n_agents, float(initial_wealth))
@@ -103,15 +106,20 @@ class YardSaleModel:
         return self.agents.copy()
 
     # --- Core dynamics ----------------------------------------------------
-    def _exchange(self, i: int, j: int):
+    def _exchange(self, i, j):
         w_i, w_j = self.agents[i], self.agents[j]
         poorer = min(w_i, w_j)
         dw = self.f * poorer
-
         sgn = self.transaction_rule.outcome(w_i, w_j)
 
-        self.agents[i] += sgn * dw
-        self.agents[j] -= sgn * dw
+        if sgn == 1:
+            self.agents[i] += (1 - self.tau) * dw
+            self.agents[j] -= dw
+            self.treasury += self.tau * dw
+        else:
+            self.agents[i] -= dw
+            self.agents[j] += (1 - self.tau) * dw
+            self.treasury += self.tau * dw
 
     def _redistribute(self, i: int, j: int):
         if self.tax is None or self.tax.chi == 0.0:
@@ -119,6 +127,22 @@ class YardSaleModel:
         mean_w = self.agents.mean()
         self.agents[i] += self.tax.apply(self.agents[i])
         self.agents[j] += self.tax.apply(self.agents[j])
+
+    def _apply_wealth_tax(self):
+        if self.omega == 0.0:
+            return
+        tax = self.omega * self.agents
+        self.agents -= tax
+        self.treasury += tax.sum()
+
+
+    def _apply_wealth_tax(self):
+        if self.omega == 0.0:
+            return
+        tax = self.omega * self.agents
+        self.agents -= tax
+        self.treasury += tax.sum()
+
 
     def step(self, n_pairs: int = None):
         n_pairs = n_pairs or self.n_agents
@@ -128,6 +152,7 @@ class YardSaleModel:
                 continue
             self._exchange(i, j)
             self._redistribute(i, j)
+    # decidir on s'aplica wealth tax
 
     def run(self, n_steps: int = 1000, record_interval: int = 100):
         history = []
@@ -135,4 +160,18 @@ class YardSaleModel:
             self.step()
             if t % record_interval == 0:
                 history.append((t, self.gini()))
-        return np.array(history), self.copy()
+        return np.array(history)
+
+
+# quantes steps perque canvii distribucio, fer gif
+# taxacio 0, 5, 10, 20, 40, 80
+# iva? wealth tax
+# iva, aduanas, 
+# intrinsecament liquid
+# graduacions liquiditat
+# herencia? 
+# tipus interes mes baix que pib o no?
+# tipus interes efectiu mes alt que el pib 
+# wealth tax io toring tax
+# liquiditat absoluta perden inflacio, bons, accions, sense derivats 
+# islm keynes diners i 1 be financer, 2 bens gradients liquidat 
