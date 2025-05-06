@@ -78,7 +78,7 @@ class YardSaleModel:
         transaction_rule: TransactionRule | None = None,
         taxation: Taxation | None = None,
         omega=0.0, # wealth tax rate, before any trade, agent loses fraction omega of their wealth
-        tau=0.0, # Tobin tax rate per trade, when dw moves from loser to winner the winner keeps only (1-tau) * dw and the rest goes to the treasury
+        tau=0.0, # Tolley tax rate per trade, when dw moves from loser to winner the winner keeps only (1-tau) * dw and the rest goes to the treasury
     ):
         self.n_agents = n_agents
         self.f = float(f)
@@ -94,6 +94,9 @@ class YardSaleModel:
 
         self.transaction_rule = transaction_rule or FairCoinRule()
         self.tax = taxation
+        self.omega = omega
+        self.tau = tau
+
 
     # --- Diagnostics -----------------------------------------------------
     def gini(self) -> float:
