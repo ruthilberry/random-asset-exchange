@@ -29,13 +29,17 @@ class FairCoinRule(TransactionRule):
 class WAARule(TransactionRule):
     """Wealth‑Attained Advantage (WAA) rule.
 
+    TODO: This class needs to be modified to use standard parametrization.
+    Current implementation uses zeta instead of the standard zeta/sqrt(gamma) and some dt.
+    This should be updated to match the standard notation in the literature.
+
     The richer agent wins with probability:
         p_rich = 0.5 + zeta * Δw / (2 * (w_i + w_j)),  clipped to [0,1].
-    Here zeta represents zeta/sqrt(gamma), following standard notation.
     """
 
-    def __init__(self, zeta: float):
+    def __init__(self, zeta: float, gamma: float):
         self.zeta = float(zeta)
+        self.gamma = float(gamma)
 
     def outcome(self, w_i: float, w_j: float):
         if w_i == w_j:
@@ -52,21 +56,12 @@ class WAARule(TransactionRule):
             return -1 if rich_is_i else 1
 
 
-class Taxation:
-    """Pair‑wise flat redistribution (rate chi).
-        The mean_wealth value is stored to avoid 
-        computing it repeatedly"""
-
-    def __init__(self, chi: float, mean_wealth: float):
-        self.chi = float(chi)
-        self.mean_wealth = mean_wealth
-
-    def apply(self, wealth: float):
-        return self.chi * (self.mean_wealth - wealth)
-
-
 class YardSaleModel:
     """Implements baseline YSM and the Extended YSM (EYSM).
+
+        TODO: Change parametrization to coincide with the standard in the literature.
+        TODO: Reorder the way that wealth tax is applied.
+
        For simplicity, we choose 
        dt = 1, f = sqrt(gamma * dt), zeta = zeta/sqrt(gamma) """
 
@@ -76,7 +71,6 @@ class YardSaleModel:
         initial_wealth=1.0, # Admits scalar or array of initial wealths
         f: float = 0.1,
         transaction_rule: TransactionRule | None = None,
-        taxation: Taxation | None = None,
         omega=0.0, # wealth tax rate, before any trade, agent loses fraction omega of their wealth
         tau=0.0, # Tolley tax rate per trade, when dw moves from loser to winner the winner keeps only (1-tau) * dw and the rest goes to the treasury
     ):
@@ -93,7 +87,6 @@ class YardSaleModel:
             self.agents = w.copy()
 
         self.transaction_rule = transaction_rule or FairCoinRule()
-        self.tax = taxation
         self.omega = omega
         self.tau = tau
 
@@ -101,7 +94,7 @@ class YardSaleModel:
     # --- Diagnostics -----------------------------------------------------
     def gini(self) -> float:
         w = np.sort(self.agents)
-        n = w.size
+        n = self.n_agents
         cum = np.cumsum(w)
         return (n + 1 - 2 * np.sum(cum) / cum[-1]) / n
 
@@ -110,6 +103,7 @@ class YardSaleModel:
 
     # --- Core dynamics ----------------------------------------------------
     def _exchange(self, i, j):
+        # Exchange includes the tolley tax
         w_i, w_j = self.agents[i], self.agents[j]
         poorer = min(w_i, w_j)
         dw = self.f * poorer
@@ -124,12 +118,6 @@ class YardSaleModel:
             self.agents[j] += (1 - self.tau) * dw
             self.treasury += self.tau * dw
 
-    def _redistribute(self, i: int, j: int):
-        if self.tax is None or self.tax.chi == 0.0:
-            return
-        self.agents[i] += self.tax.apply(self.agents[i])
-        self.agents[j] += self.tax.apply(self.agents[j])
-
     def _apply_wealth_tax(self):
         if self.omega == 0.0:
             return
@@ -137,29 +125,40 @@ class YardSaleModel:
         self.agents -= tax
         self.treasury += tax.sum()
 
+    def _redistribute(self):
+        t = self.treasury
+        self.treasury = 0
+        self.agents += t/self.n_agents
 
-    def _apply_wealth_tax(self):
-        if self.omega == 0.0:
-            return
-        tax = self.omega * self.agents
-        self.agents -= tax
-        self.treasury += tax.sum()
+    def step(self):
+        '''
 
+        TODO: Change wealth tax application time to make it more realistic.
 
-    def step(self, n_pairs: int = None):
-        n_pairs = n_pairs or self.n_agents
+        We apply the wealth tax and redistribute the treasury funds after n/2 pairwise
+        exchanges have taken place, so that each agent has taken part in an average of 1
+        exchange per wealth tax.
+        '''
+        n_pairs = self.n_agents//2
         for _ in range(n_pairs):
-            i, j = np.random.randint(0, self.n_agents, 2)
-            if i == j:
-                continue
+            while True:
+                i, j = np.random.randint(0, self.n_agents, 2)
+                if i != j:
+                    break
             self._exchange(i, j)
-            self._redistribute(i, j)
-    # decidir on s'aplica wealth tax
+        
+        self._apply_wealth_tax()
+        self._redistribute()
 
-    def run(self, n_steps: int = 1000, record_interval: int = 100):
-        history = []
+    def run(self, n_steps: int = 1000, record_interval: int = 100, return_history: bool = True):
+        if return_history:
+            history = []
         for t in range(1, n_steps + 1):
             self.step()
-            if t % record_interval == 0:
+            if return_history and t % record_interval == 0:
                 history.append((t, self.gini()))
-        return np.array(history)
+
+        if return_history:
+            return np.array(history)
+        else:
+            return
