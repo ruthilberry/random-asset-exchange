@@ -1,0 +1,13 @@
+After 100 steps, we reach the steady state for a random population with the following properties:
+
+    n_individuals = 500
+    n_steps = 100
+    
+    # Initialize with random uniform distributions
+    initial_money = np.random.uniform(0.3, 1.7, n_individuals)
+    initial_stocks = np.random.uniform(0.3, 1.7, n_individuals)
+    savings_rates = np.random.uniform(0.9, 0.95, n_individuals)
+
+
+We check that as we expected, the steady state wealth of agents is proportional to stocksA/(1-savings).
+    
