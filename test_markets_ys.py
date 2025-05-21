@@ -20,7 +20,7 @@ class TestPopulation(unittest.TestCase):
     def test_array_initialization(self):
         """Test initialization with array inputs"""
         custom_money = np.random.uniform(0.5, 1.5, self.n_individuals)
-        custom_stocks = np.random.uniform(0.5, 1.5, self.n_individuals)
+        custom_stocks = np.random.randint(500, 1501, self.n_individuals)
         custom_savings = np.random.uniform(0.8, 0.99, self.n_individuals)
         
         pop = Population(
@@ -75,7 +75,7 @@ def test_steady_state_hypothesis():
     
     # Initialize with random uniform distributions
     initial_money = np.random.uniform(0.3, 1.7, n_individuals)
-    initial_stocks = np.random.uniform(0.3, 1.7, n_individuals)
+    initial_stocks = np.random.randint(300, 1701, n_individuals)
     savings_rates = np.random.uniform(0.9, 0.95, n_individuals)
     
     # Create and run economy
