@@ -93,6 +93,8 @@ class Population:
     - money: their current wealth
     - stocksA: number of stocks owned in company A
     - savings_rates: fraction of wealth they save (s)
+    - min_stock_frac: minimum fraction of stocks they must keep
+    - lambda_risk: risk aversion parameter for trading decisions
     
     Attributes are stored in NumPy arrays for efficient operations.
     """
@@ -102,13 +104,18 @@ class Population:
         initial_money: Union[float, np.ndarray] = 1.0,
         initial_stocksA: Union[int, np.ndarray] = 1000,
         savings_rates: Union[float, np.ndarray] = 0.99,
+        min_stock_frac_range: tuple = (0.1, 0.5),  # Range for minimum stock fraction
+        lambda_risk_range: tuple = (0.05, 0.30),   # Range for risk aversion
     ):
         self.n_individuals = n_individuals
         
-        # Handle scalar or array inputs for each attribute
         self.money = self._initialize_array(initial_money, "initial_money")
         self.stocksA = np.asarray(self._initialize_array(initial_stocksA, "initial_stocksA"), dtype=int)
         self.savings_rates = self._initialize_array(savings_rates, "savings_rates")
+        
+        # each individual has a different min stock fraction and risk aversion
+        self.min_stock_frac = np.random.uniform(min_stock_frac_range[0], min_stock_frac_range[1], n_individuals)
+        self.lambda_risk = np.random.uniform(lambda_risk_range[0], lambda_risk_range[1], n_individuals)
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
         """Helper method to initialize arrays from scalar or array inputs."""
@@ -151,12 +158,16 @@ class Economy:
         p: float = 0.5, # error probability
         money_tax_rate: float = 0.01,  # 1% tax on liquid money
         stock_tax_rate: float = 0.005,  # 0.5% tax on stock wealth
+        min_stock_frac_range: tuple = (0.2, 0.5),  # Range for minimum stock fraction
+        lambda_risk_range: tuple = (0.05, 0.30),   # Range for risk aversion
     ):
         self.population = Population(
             n_individuals=n_individuals,
             initial_money=initial_money,
             initial_stocksA=initial_stocksA,
-            savings_rates=savings_rates
+            savings_rates=savings_rates,
+            min_stock_frac_range=min_stock_frac_range,
+            lambda_risk_range=lambda_risk_range
         )
         self.n_individuals = n_individuals
         self.trading_limits = self._initialize_array(trading_limits, "trading_limits")
@@ -221,19 +232,45 @@ class Economy:
         # choose random order to add orders to order book
         eps = 1e-12 # small deviation to avoid equal buy and sell price
         order_indices = np.random.permutation(2*self.n_individuals)
+        
+        # Compute expected value for risk premium calculations
+        EV = self.prev_revenue / self.total_stocksA / self.r if self.t > 0 else None
+        
         for i in order_indices:
             if i < self.n_individuals:
                 # buy order
                 p = self.share_prices[i]
+                
+                # Apply risk premium rule for buying
+                if self.t > 0:  
+                    reservation_buy = (1 + self.population.lambda_risk[i]) * EV
+                    if p > reservation_buy:
+                        continue  # price too high, skip buy order, not worth the risk
+                
                 quant = np.floor(min(self.population.money[i], self.max_money_to_trade[i]/2)/p)
                 quant = min(quant, self.total_stocksA)
                 self.order_book.add_buy_order(i, p*(1-eps), int(quant))
             else:
                 # sell order
-                p = self.share_prices[i-self.n_individuals]
-                quant = np.floor(min(self.population.stocksA[i-self.n_individuals], self.max_money_to_trade[i-self.n_individuals]/2/p))
+                idx = i - self.n_individuals
+                p = self.share_prices[idx]
+                
+                # Apply portfolio reserve rule
+                s_min = self.population.min_stock_frac[idx] * self.population.stocksA[idx]
+                max_qty = self.population.stocksA[idx] - s_min
+                if max_qty <= 0:
+                    continue  # forbidden to sell; skip order
+                
+                # Apply risk premium rule for selling
+                if self.t > 0:  # Skip at t=0 when EV is undefined
+                    reservation_sell = (1 - self.population.lambda_risk[idx]) * EV
+                    if p < reservation_sell:
+                        continue  # price too low, skip sell order
+                
+                quant = np.floor(min(max_qty, self.max_money_to_trade[idx]/2/p))
                 quant = min(quant, self.total_stocksA)
-                self.order_book.add_sell_order(i-self.n_individuals, p*(1+eps), int(quant))
+                self.order_book.add_sell_order(idx, p*(1+eps), int(quant))
+            
             # perform a trade if appropriate
             if self.order_book.get_best_buy() and self.order_book.get_best_sell():
                 if self.order_book.get_best_buy().price >= self.order_book.get_best_sell().price:
