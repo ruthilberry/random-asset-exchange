@@ -4,6 +4,8 @@ from typing import Union, Optional
 import heapq
 from dataclasses import dataclass
 from typing import List
+import os
+import datetime
 
 @dataclass
 class Order:
@@ -151,6 +153,7 @@ class Economy:
             initial_stocksA=initial_stocksA,
             savings_rates=savings_rates
         )
+        self.n_individuals = n_individuals
         self.trading_limits = self._initialize_array(trading_limits, "trading_limits")
         self.total_money = self.population.money.sum()
         self.total_stocksA = self.population.stocksA.sum()
@@ -176,7 +179,8 @@ class Economy:
     def _buy_firmA(self) -> None:
         """Agents buy goods from firm A, spending their non-saved wealth."""
         spent_money = self.population.money * (1 - self.population.savings_rates)
-        self.firmA_wealth += spent_money.sum()
+        self.firmA_wealth = spent_money.sum()
+        self.prev_revenue = self.firmA_wealth
         self.population.money *= self.population.savings_rates
     
     def _pay_dividends(self) -> None:
@@ -184,19 +188,20 @@ class Economy:
         if self.total_stocksA == 0:
             return
         dividends = self.firmA_wealth * self.population.stocksA / self.total_stocksA
-        self.prev_dividends = dividends
         self.population.money += dividends
         self.firmA_wealth = 0.0  # Reset firm wealth after paying dividends
 
     def _compute_share_prices(self) -> np.ndarray:
         """Compute the prices that each agent would pay for a share of firm A."""
-        EV = self.prev_dividends / self.r
+        EV = self.prev_revenue / self.total_stocksA / self.r # expected value of a share
         # error factor
         f = np.ones(self.n_individuals)
         f += np.random.binomial(1, self.p, size=self.n_individuals) * np.random.normal(0, self.E, size=self.n_individuals)
         f = np.clip(f, 0.1, 3) # avoid prices that are too close to zero
         # this way some fraction of individuals will wrongly estimate the value
         self.share_prices = EV * f
+        assert np.all(self.share_prices > 0), f"""All share prices must 
+        be strictly positive at time step {self.t}, previous revenue per share: {self.prev_revenue/self.total_stocksA}, error factor: {np.min(f)}, EV: {EV}"""
 
     def _compute_trade_limits(self) -> None:
         """Compute the trade limits for each agent.
@@ -214,12 +219,14 @@ class Economy:
                 # buy order
                 p = self.share_prices[i]
                 quant = np.floor(min(self.population.money[i], self.max_money_to_trade[i]/2)/p)
+                quant = min(quant, self.total_stocksA)
                 self.order_book.add_buy_order(i, p*(1-eps), int(quant))
             else:
                 # sell order
                 p = self.share_prices[i-self.n_individuals]
                 quant = np.floor(min(self.population.stocksA[i-self.n_individuals], self.max_money_to_trade[i-self.n_individuals]/2/p))
-                self.order_book.add_sell_order(i, p*(1+eps), int(quant))
+                quant = min(quant, self.total_stocksA)
+                self.order_book.add_sell_order(i-self.n_individuals, p*(1+eps), int(quant))
             # perform a trade if appropriate
             if self.order_book.get_best_buy() and self.order_book.get_best_sell():
                 if self.order_book.get_best_buy().price >= self.order_book.get_best_sell().price:
@@ -257,3 +264,39 @@ class Economy:
         """Run the economy for a specified number of steps."""
         for _ in range(n_steps):
             self.step()
+
+    def plot_wealth_distribution(self) -> None:
+        """Plot the Lorenz curve of agent wealth.
+        
+        Wealth is computed as: money + (prev_revenue/total_stocksA/r) * stocksA
+        """
+        # Compute wealth for each agent
+        stock_value = self.prev_revenue / self.total_stocksA / self.r
+        wealth = self.population.money + stock_value * self.population.stocksA
+        
+        # Sort wealth for Lorenz curve
+        sorted_wealth = np.sort(wealth)
+        
+        # Compute cumulative wealth shares
+        total_wealth = np.sum(sorted_wealth)
+        cumulative_wealth = np.cumsum(sorted_wealth) / total_wealth
+        
+        # Create population shares (x-axis of Lorenz curve)
+        n = len(wealth)
+        population_shares = np.arange(1, n + 1) / n
+        
+        # Plot
+        plt.figure(figsize=(8, 8))  # Square figure
+        plt.plot(population_shares, cumulative_wealth, 'b-', label='Lorenz Curve')
+        plt.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
+        plt.xlabel('Cumulative Population Share')
+        plt.ylabel('Cumulative Wealth Share')
+        plt.title(f'Lorenz Curve of Wealth Distribution\nDefault Economy with n = {self.n_individuals} at t={self.t}')
+        plt.grid(True)
+        plt.legend()
+        
+        # Save plot
+        os.makedirs('experiments/markets_ys', exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        plt.savefig(f'experiments/markets_ys/lorenz_curve_t{self.t}_{timestamp}.jpg')
+        plt.close()

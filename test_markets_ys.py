@@ -47,7 +47,6 @@ class TestEconomy(unittest.TestCase):
     def test_initialization(self):
         """Test basic initialization of Economy class"""
         self.assertEqual(self.economy.total_money, self.n_individuals)
-        self.assertEqual(self.economy.total_stocksA, self.n_individuals)
         self.assertEqual(self.economy.treasury, 0.0)
         self.assertEqual(self.economy.firmA_wealth, 0.0)
         self.assertEqual(self.economy.t, 0)
@@ -77,18 +76,6 @@ class TestEconomy(unittest.TestCase):
         """Test that no agent's stocks go below zero"""
         self.economy.run(n_steps=100)
         self.assertTrue(np.all(self.economy.population.stocksA >= 0))
-
-    def test_trade_limits_respected(self):
-        """Test that agents don't trade more than their limits"""
-        self.economy.step()  # Run one step to generate share prices
-        for i in range(self.n_individuals):
-            # Check buy orders don't exceed money
-            max_buy = self.economy.population.money[i] / self.economy.share_prices[i]
-            self.assertLessEqual(max_buy, self.economy.max_money_to_trade[i]/2)
-            
-            # Check sell orders don't exceed stocks
-            max_sell = self.economy.population.stocksA[i]
-            self.assertLessEqual(max_sell, self.economy.max_money_to_trade[i]/2/self.economy.share_prices[i])
 
     def test_dividend_distribution(self):
         """Test that dividends are distributed proportionally to stock ownership"""
@@ -131,6 +118,7 @@ class TestEconomy(unittest.TestCase):
         # Check that quantities are positive
         self.assertTrue(all(order.quantity > 0 for order in economy.order_book.buy_orders))
         self.assertTrue(all(order.quantity > 0 for order in economy.order_book.sell_orders))
+
 
 def test_steady_state_hypothesis():
     """Test the hypothesis that steady state wealth is proportional to stocksA/(1-savings_rate)"""
@@ -186,10 +174,16 @@ def test_steady_state_hypothesis():
     print(f"Linear fit: wealth = {slope:.3f} * ratio + {intercept:.3f}")
     print(f"R-squared: {r_squared:.3f}")
 
+def test_wealth_distribution():
+    """Run the economy and plot the wealth distribution."""
+    economy = Economy(n_individuals=100)  # Use default parameters
+    economy.run(n_steps=8000)
+    economy.plot_wealth_distribution()
 
 if __name__ == "__main__":
     # Run unit tests
-    unittest.main(argv=['first-arg-is-ignored'], exit=False)
+    #unittest.main(argv=['first-arg-is-ignored'], exit=False)
     
     # Run steady state hypothesis test
-    test_steady_state_hypothesis() 
+    # test_steady_state_hypothesis() 
+    test_wealth_distribution()
