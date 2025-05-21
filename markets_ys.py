@@ -127,6 +127,7 @@ class Economy:
     1. Agents buying goods from the firm (spending non-saved wealth)
     2. Firm paying dividends to agents based on their stock ownership
     3. Time evolution through discrete steps
+    4. Wealth taxation and redistribution
     
     Attributes:
         population: The population of agents
@@ -135,6 +136,8 @@ class Economy:
         treasury: Government treasury (currently unused)
         firmA_wealth: Current wealth of firm A
         t: Current time step
+        money_tax_rate: Tax rate on liquid money
+        stock_tax_rate: Tax rate on stock wealth
     """
     def __init__(
         self,
@@ -146,6 +149,8 @@ class Economy:
         r: float = 0.1, # intertemporal discount rate
         E: float = 0.2, # error std deviation
         p: float = 0.5, # error probability
+        money_tax_rate: float = 0.01,  # 1% tax on liquid money
+        stock_tax_rate: float = 0.005,  # 0.5% tax on stock wealth
     ):
         self.population = Population(
             n_individuals=n_individuals,
@@ -163,6 +168,8 @@ class Economy:
         self.r = r
         self.E = E
         self.p = p
+        self.money_tax_rate = money_tax_rate
+        self.stock_tax_rate = stock_tax_rate
         self.order_book = OrderBook()  # Initialize the order book
 
 
@@ -251,13 +258,30 @@ class Economy:
         self._compute_trade_limits() # stored in self.max_money_to_trade
         self._perform_trades()
 
+    def _apply_wealth_tax(self) -> None:
+        """Apply separate taxes on money and stock wealth, with money tax applied after dividends."""
+        # First apply stock wealth tax
+        stock_wealth = self.population.stocksA * self.share_prices
+        stock_tax = stock_wealth * self.stock_tax_rate
+        
+        # Then apply money tax (after dividends)
+        money_tax = self.population.money * self.money_tax_rate
+        
+        # Total tax collection
+        total_tax = stock_tax.sum() + money_tax.sum()
+        
+        # Redistribute equally among all agents
+        redistribution = total_tax / self.n_individuals
+        
+        # Apply taxes and redistribution
+        self.population.money += redistribution - money_tax - stock_tax
 
     def step(self) -> None:
-        """Perform one time step of the economy."""
+        """Perform one step of the economic simulation."""
         self._buy_firmA()
         self._pay_dividends()
-        if self.t != 0:
-            self._trade_phase()
+        self._trade_phase()
+        self._apply_wealth_tax()
         self.t += 1
 
     def run(self, n_steps: int = 1000) -> None:
@@ -291,7 +315,7 @@ class Economy:
         plt.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
         plt.xlabel('Cumulative Population Share')
         plt.ylabel('Cumulative Wealth Share')
-        plt.title(f'Lorenz Curve of Wealth Distribution\nDefault Economy with n = {self.n_individuals} at t={self.t}')
+        plt.title(f'Lorenz Curve of Wealth Distribution\nDefault Economy with n = {self.n_individuals} at t = {self.t}')
         plt.grid(True)
         plt.legend()
         
