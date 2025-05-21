@@ -68,6 +68,70 @@ class TestEconomy(unittest.TestCase):
         final_stocks = self.economy.population.stocksA.sum()
         self.assertEqual(initial_stocks, final_stocks)
 
+    def test_no_negative_wealth(self):
+        """Test that no agent's wealth goes below zero"""
+        self.economy.run(n_steps=100)
+        self.assertTrue(np.all(self.economy.population.money >= 0))
+
+    def test_no_negative_stocks(self):
+        """Test that no agent's stocks go below zero"""
+        self.economy.run(n_steps=100)
+        self.assertTrue(np.all(self.economy.population.stocksA >= 0))
+
+    def test_trade_limits_respected(self):
+        """Test that agents don't trade more than their limits"""
+        self.economy.step()  # Run one step to generate share prices
+        for i in range(self.n_individuals):
+            # Check buy orders don't exceed money
+            max_buy = self.economy.population.money[i] / self.economy.share_prices[i]
+            self.assertLessEqual(max_buy, self.economy.max_money_to_trade[i]/2)
+            
+            # Check sell orders don't exceed stocks
+            max_sell = self.economy.population.stocksA[i]
+            self.assertLessEqual(max_sell, self.economy.max_money_to_trade[i]/2/self.economy.share_prices[i])
+
+    def test_dividend_distribution(self):
+        """Test that dividends are distributed proportionally to stock ownership"""
+        # Set up a simple case with two agents
+        economy = Economy(n_individuals=2, initial_stocksA=[100, 900])
+        economy.firmA_wealth = 1000.0
+        
+        # Store initial money
+        initial_money = economy.population.money.copy()
+        
+        # Pay dividends
+        economy._pay_dividends()
+        
+        # Check that dividends were distributed proportionally
+        total_dividends = economy.population.money - initial_money
+        expected_ratio = 100/900  # Ratio of stocks
+        actual_ratio = total_dividends[0]/total_dividends[1]
+        self.assertAlmostEqual(actual_ratio, expected_ratio, places=5)
+
+    def test_order_book_consistency(self):
+        """Test that order book maintains proper ordering and quantities"""
+        economy = Economy(n_individuals=10)
+        economy.step()  # Generate share prices
+        
+        # Add some orders
+        for i in range(5):
+            economy.order_book.add_buy_order(i, 6 + i, 1)
+            economy.order_book.add_sell_order(i+5, 3+i, 1)
+        
+        # Check that best buy is highest price
+        best_buy = economy.order_book.get_best_buy()
+        self.assertIsNotNone(best_buy)
+        self.assertAlmostEqual(best_buy.price, 10.0)
+        
+        # Check that best sell is lowest price
+        best_sell = economy.order_book.get_best_sell()
+        self.assertIsNotNone(best_sell)
+        self.assertAlmostEqual(best_sell.price, 3.0)
+        
+        # Check that quantities are positive
+        self.assertTrue(all(order.quantity > 0 for order in economy.order_book.buy_orders))
+        self.assertTrue(all(order.quantity > 0 for order in economy.order_book.sell_orders))
+
 def test_steady_state_hypothesis():
     """Test the hypothesis that steady state wealth is proportional to stocksA/(1-savings_rate)"""
     n_individuals = 500
