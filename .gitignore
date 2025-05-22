@@ -24,4 +24,5 @@ env/
 
 # Local development settings
 .env
+.venv
 .env.local 
