@@ -133,8 +133,9 @@ class Economy:
     The economy operates through:
     1. Agents buying goods from the firm (spending non-saved wealth)
     2. Firm paying dividends to agents based on their stock ownership
-    3. Time evolution through discrete steps
-    4. Wealth taxation and redistribution
+    3. Agents exchanging stocks
+    4. Time evolution through discrete steps
+    5. Wealth taxation and redistribution
     
     Attributes:
         population: The population of agents
@@ -229,12 +230,13 @@ class Economy:
 
     def _perform_trades(self) -> None:
         """Perform trades from the order book."""
-        # choose random order to add orders to order book
+
+        # choose random permutation to add orders to order book
         eps = 1e-12 # small deviation to avoid equal buy and sell price
         order_indices = np.random.permutation(2*self.n_individuals)
         
         # Compute expected value for risk premium calculations
-        EV = self.prev_revenue / self.total_stocksA / self.r if self.t > 0 else None
+        EV = self.prev_revenue / self.total_stocksA / self.r
         
         for i in order_indices:
             if i < self.n_individuals:
@@ -242,7 +244,7 @@ class Economy:
                 p = self.share_prices[i]
                 
                 # Apply risk premium rule for buying
-                if self.t > 0:  
+                if self.t > 0:
                     reservation_buy = (1 + self.population.lambda_risk[i]) * EV
                     if p > reservation_buy:
                         continue  # price too high, skip buy order, not worth the risk
