@@ -1,0 +1,19 @@
+# Market Simulation Experiment Log
+# Notes about the experiment and observations
+
+[wdist_19:58_May_25.jpg]
+Economy with all agents equal and with no share market. Perfect equality is achieved because all individuals consume the same.
+
+[wdist_20:06_May_25.jpg]
+We add a share market where agents have some probability to make mistakes (determined by p,E).
+The result is that all individuals except for one end up in a poverty trap.
+Perfect inequality is achieved with all stocks and all money being accumulated by a single individual.
+Thus accumulated errors generate inequality.
+
+[wdist_20:06_May_25.jpg]
+Taxes are added with a reasonable tax rate (0.15% daily corresponds to more than 40% yearly).
+Wealth condensation is observed, indicating that this amount of taxes seems to be weaker 
+than the error mechanism that generates inequality. 
+Wealth condensation means that a few agents hold a percentage of all wealth.
+In this case, one agent holds 99% of all wealth.
+
