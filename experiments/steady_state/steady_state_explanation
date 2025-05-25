@@ -9,5 +9,5 @@ After 100 steps, we reach the steady state for a random population with the foll
     savings_rates = np.random.uniform(0.9, 0.95, n_individuals)
 
 
-We check that as we expected, the steady state wealth of agents is proportional to stocksA/(1-savings).
+We check that the steady state wealth of agents is proportional to stocksA/(1-savings).
     

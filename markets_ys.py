@@ -104,18 +104,16 @@ class Population:
         initial_money: Union[float, np.ndarray] = 1.0,
         initial_stocksA: Union[int, np.ndarray] = 1000,
         savings_rates: Union[float, np.ndarray] = 0.99,
-        min_stock_frac_range: tuple = (0.1, 0.5),  # Range for minimum stock fraction
-        lambda_risk_range: tuple = (0.05, 0.30),   # Range for risk aversion
+        min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction
+        lambda_risk: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
     ):
         self.n_individuals = n_individuals
         
         self.money = self._initialize_array(initial_money, "initial_money")
         self.stocksA = np.asarray(self._initialize_array(initial_stocksA, "initial_stocksA"), dtype=int)
         self.savings_rates = self._initialize_array(savings_rates, "savings_rates")
-        
-        # each individual has a different min stock fraction and risk aversion
-        self.min_stock_frac = np.random.uniform(min_stock_frac_range[0], min_stock_frac_range[1], n_individuals)
-        self.lambda_risk = np.random.uniform(lambda_risk_range[0], lambda_risk_range[1], n_individuals)
+        self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
+        self.lambda_risk = self._initialize_array(lambda_risk, "lambda_risk")
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
         """Helper method to initialize arrays from scalar or array inputs."""
@@ -141,12 +139,19 @@ class Economy:
         population: The population of agents
         total_money: Total money in the economy
         total_stocksA: Total number of stocks in company A
-        treasury: Government treasury (currently unused)
         firmA_wealth: Current wealth of firm A
         t: Current time step
         money_tax_rate: Tax rate on liquid money
         stock_tax_rate: Tax rate on stock wealth
     """
+
+    # TODO: Elegir y justificar valores realistas de los parametros
+    # TODO: Introducir un parametro dt que permita controlar el tiempo de cada paso
+    #       Serviria para hacer simulaciones mas rapidas cuando nos sea interesante
+
+    # TODO: Documentar wealth condensation. 
+    # Se observa cuando las taxes son suficientemente bajas :)
+
     def __init__(
         self,
         n_individuals: int = 1000,
@@ -156,25 +161,25 @@ class Economy:
         trading_limits: Union[float, np.ndarray] = 0.05,
         r: float = 0.1, # intertemporal discount rate
         E: float = 0.2, # error std deviation
-        p: float = 0.5, # error probability
-        money_tax_rate: float = 0.01,  # 1% tax on liquid money
-        stock_tax_rate: float = 0.005,  # 0.5% tax on stock wealth
-        min_stock_frac_range: tuple = (0.2, 0.5),  # Range for minimum stock fraction
-        lambda_risk_range: tuple = (0.05, 0.30),   # Range for risk aversion
+        p: float = 0.01, # error probability
+        money_tax_rate: float = 0.0015,  # tax on liquid money, default 0.15%
+        stock_tax_rate: float = 0.0,  # tax on stock wealth (currently not working)
+        min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction (currently not working)
+        lambda_risk: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
+        markets_enabled: bool = True,  # whether to enable stock trading
     ):
         self.population = Population(
             n_individuals=n_individuals,
             initial_money=initial_money,
             initial_stocksA=initial_stocksA,
             savings_rates=savings_rates,
-            min_stock_frac_range=min_stock_frac_range,
-            lambda_risk_range=lambda_risk_range
+            min_stock_frac=min_stock_frac,
+            lambda_risk=lambda_risk
         )
         self.n_individuals = n_individuals
         self.trading_limits = self._initialize_array(trading_limits, "trading_limits")
         self.total_money = self.population.money.sum()
         self.total_stocksA = self.population.stocksA.sum()
-        self.treasury = 0.0
         self.firmA_wealth = 0.0
         self.t = 0
         self.r = r
@@ -182,8 +187,14 @@ class Economy:
         self.p = p
         self.money_tax_rate = money_tax_rate
         self.stock_tax_rate = stock_tax_rate
-        self.order_book = OrderBook()  # Initialize the order book
-
+        self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
+        self.lambda_risk = self._initialize_array(lambda_risk, "lambda_risk")
+        self.markets_enabled = markets_enabled
+        self.order_book = OrderBook() if markets_enabled else None
+        
+        # Store initial values for parameter documentation
+        self.initial_money = initial_money
+        self.initial_stocksA = initial_stocksA
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
         """Helper method to initialize arrays from scalar or array inputs."""
@@ -213,12 +224,15 @@ class Economy:
     def _compute_share_prices(self) -> np.ndarray:
         """Compute the prices that each agent would pay for a share of firm A."""
         EV = self.prev_revenue / self.total_stocksA / self.r # expected value of a share
-        # error factor
+
+        # error factor (random values corresponding to judgement errors)
         f = np.ones(self.n_individuals)
         f += np.random.binomial(1, self.p, size=self.n_individuals) * np.random.normal(0, self.E, size=self.n_individuals)
         f = np.clip(f, 0.1, 3) # avoid prices that are too close to zero
         # this way some fraction of individuals will wrongly estimate the value
-        self.share_prices = EV * f
+
+        # Multiply by the error factor and the risk aversion factor
+        self.share_prices = EV * (1 - self.population.lambda_risk) * f
         assert np.all(self.share_prices > 0), f"""All share prices must 
         be strictly positive at time step {self.t}, previous revenue per share: {self.prev_revenue/self.total_stocksA}, error factor: {np.min(f)}, EV: {EV}"""
 
@@ -232,45 +246,32 @@ class Economy:
         """Perform trades from the order book."""
 
         # choose random permutation to add orders to order book
-        eps = 1e-12 # small deviation to avoid equal buy and sell price
         order_indices = np.random.permutation(2*self.n_individuals)
-        
-        # Compute expected value for risk premium calculations
-        EV = self.prev_revenue / self.total_stocksA / self.r
+
+        eps = 1e-14 # small deviation to avoid equal buy and sell price
         
         for i in order_indices:
             if i < self.n_individuals:
                 # buy order
-                p = self.share_prices[i]
-                
-                # Apply risk premium rule for buying
-                if self.t > 0:
-                    reservation_buy = (1 + self.population.lambda_risk[i]) * EV
-                    if p > reservation_buy:
-                        continue  # price too high, skip buy order, not worth the risk
-                
-                quant = np.floor(min(self.population.money[i], self.max_money_to_trade[i]/2)/p)
+                p = self.share_prices[i]*(1-eps) # multiply by 1-eps to avoid all buy and sell values being the same
+
+                quant = np.floor(min(self.population.money[i], self.max_money_to_trade[i])/p)
                 quant = min(quant, self.total_stocksA)
+                if quant == 0:
+                    continue
                 self.order_book.add_buy_order(i, p*(1-eps), int(quant))
             else:
                 # sell order
                 idx = i - self.n_individuals
-                p = self.share_prices[idx]
-                
+                p = self.share_prices[idx]* (1 + eps) # multiply by 1+eps to avoid all buy and sell values being the same
+
+                quant = np.floor(min(self.population.stocksA[idx], self.max_money_to_trade[idx]/p))
+
                 # Apply portfolio reserve rule
-                s_min = self.population.min_stock_frac[idx] * self.population.stocksA[idx]
-                max_qty = self.population.stocksA[idx] - s_min
-                if max_qty <= 0:
-                    continue  # forbidden to sell; skip order
-                
-                # Apply risk premium rule for selling
-                if self.t > 0:  # Skip at t=0 when EV is undefined
-                    reservation_sell = (1 - self.population.lambda_risk[idx]) * EV
-                    if p < reservation_sell:
-                        continue  # price too low, skip sell order
-                
-                quant = np.floor(min(max_qty, self.max_money_to_trade[idx]/2/p))
-                quant = min(quant, self.total_stocksA)
+                # TODO: Apply portfolio reserve rule
+
+                if quant == 0:
+                    continue
                 self.order_book.add_sell_order(idx, p*(1+eps), int(quant))
             
             # perform a trade if appropriate
@@ -293,14 +294,22 @@ class Economy:
 
     def _trade_phase(self) -> None:
         """Agents trade shares of firm A."""
+        if not self.markets_enabled:
+            return
+            
         self._compute_share_prices() # stored in self.share_prices
         self._compute_trade_limits() # stored in self.max_money_to_trade
         self._perform_trades()
 
-    def _apply_wealth_tax(self) -> None:
-        """Apply separate taxes on money and stock wealth, with money tax applied after dividends."""
+    def _apply_taxes(self) -> None:
+        """Apply separate taxes on money and stock wealth, and redistribute collected taxes among individuals"""
+        # TODO: Figure out how to apply stock wealth tax without sending agents into negative wealth
+        # Maybe if you can't pay with money you are forced to sell some shares to the government and then the government
+        # participates in the stock market only to sell those shares
         # First apply stock wealth tax
-        stock_wealth = self.population.stocksA * self.share_prices
+        if self.money_tax_rate == 0.0 and self.stock_tax_rate == 0.0:
+            return
+        stock_wealth = self.population.stocksA * self.prev_revenue/self.total_stocksA/self.r # compute stock wealth based on EV
         stock_tax = stock_wealth * self.stock_tax_rate
         
         # Then apply money tax (after dividends)
@@ -320,7 +329,7 @@ class Economy:
         self._buy_firmA()
         self._pay_dividends()
         self._trade_phase()
-        self._apply_wealth_tax()
+        self._apply_taxes()
         self.t += 1
 
     def run(self, n_steps: int = 1000) -> None:
@@ -328,38 +337,97 @@ class Economy:
         for _ in range(n_steps):
             self.step()
 
-    def plot_wealth_distribution(self) -> None:
-        """Plot the Lorenz curve of agent wealth.
-        
-        Wealth is computed as: money + (prev_revenue/total_stocksA/r) * stocksA
+    def document_wealth_distribution(self) -> None:
+        """Plot and store wealth distribution analysis including:
+        - Configuration parameters
+        - Lorenz curve of total wealth
+        - Histogram of money distribution
+        - Histogram of stock ownership
         """
-        # Compute wealth for each agent
+        # Compute wealth components
         stock_value = self.prev_revenue / self.total_stocksA / self.r
-        wealth = self.population.money + stock_value * self.population.stocksA
+        money = self.population.money
+        stocks = self.population.stocksA
+        total_wealth = money + stock_value * stocks
+
         
-        # Sort wealth for Lorenz curve
-        sorted_wealth = np.sort(wealth)
+        # Compute Lorenz curve
+        sorted_wealth = np.sort(total_wealth)
+        cumulative_wealth = np.cumsum(sorted_wealth) / np.sum(sorted_wealth)
+        population_shares = np.arange(1, len(total_wealth) + 1) / len(total_wealth)
         
-        # Compute cumulative wealth shares
-        total_wealth = np.sum(sorted_wealth)
-        cumulative_wealth = np.cumsum(sorted_wealth) / total_wealth
+        # Calculate Gini coefficient
+        gini = 1 - 2 * np.trapezoid(cumulative_wealth, population_shares)
+
+
+        # Create figure with 2x2 subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 7.5))
         
-        # Create population shares (x-axis of Lorenz curve)
-        n = len(wealth)
-        population_shares = np.arange(1, n + 1) / n
+        # Create parameter text
+        def format_array_param(arr):
+            if isinstance(arr, float) or isinstance(arr, int):
+                return str(arr)
+            if np.min(arr) == np.max(arr):
+                return str(arr[0])
+            return f'non-constant array with average {np.mean(arr):.3f}'
+
+        param_text = f"""Simulation Parameters (t={self.t}):
+markets_enabled: {self.markets_enabled}
+n_individuals: {self.n_individuals}
+initial_money: {format_array_param(self.initial_money)}
+initial_stocksA: {format_array_param(self.initial_stocksA)}
+savings_rates: {format_array_param(self.population.savings_rates)}
+trading_limits: {format_array_param(self.trading_limits)}
+r: {self.r}
+E: {self.E}
+p: {self.p}
+money_tax_rate: {self.money_tax_rate}
+stock_tax_rate: {self.stock_tax_rate}
+min_stock_frac: {format_array_param(self.min_stock_frac)}
+lambda_risk: {format_array_param(self.lambda_risk)}
+Gini coefficient: {gini:.3f}"""
         
-        # Plot
-        plt.figure(figsize=(8, 8))  # Square figure
-        plt.plot(population_shares, cumulative_wealth, 'b-', label='Lorenz Curve')
-        plt.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
-        plt.xlabel('Cumulative Population Share')
-        plt.ylabel('Cumulative Wealth Share')
-        plt.title(f'Lorenz Curve of Wealth Distribution\nDefault Economy with n = {self.n_individuals} at t = {self.t}')
-        plt.grid(True)
-        plt.legend()
+        # Plot parameters in first subplot
+        ax1.axis('off')
+        ax1.text(0.1, 0.5, param_text, fontsize=11, family='monospace', va='center')
         
-        # Save plot
+        # Plot Lorenz curve in second subplot
+        ax2.plot(population_shares, cumulative_wealth, 'b-', label='Lorenz Curve')
+        ax2.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
+        ax2.set_title(f'Lorenz Curve (Gini = {gini:.3f})', fontsize=11)
+        ax2.set_xlabel('Cumulative Population Share', fontsize=11)
+        ax2.set_ylabel('Cumulative Wealth Share', fontsize=11)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(fontsize=11)
+        ax2.tick_params(axis='both', which='major', labelsize=11)
+        
+        # Plot money histogram in third subplot
+        ax3.hist(money, bins=50, alpha=0.7, color='blue')
+        ax3.set_title('Distribution of Money', fontsize=11)
+        ax3.set_xlabel('Money', fontsize=11)
+        ax3.set_ylabel('Number of Agents', fontsize=11)
+        ax3.grid(True, alpha=0.3)
+        ax3.tick_params(axis='both', which='major', labelsize=11)
+        
+        # Plot stocks histogram in fourth subplot
+        ax4.hist(stocks, bins=50, alpha=0.7, color='green')
+        ax4.set_title('Distribution of Stock Ownership', fontsize=11)
+        ax4.set_xlabel('Number of Stocks', fontsize=11)
+        ax4.set_ylabel('Number of Agents', fontsize=11)
+        ax4.grid(True, alpha=0.3)
+        ax4.tick_params(axis='both', which='major', labelsize=11)
+        
+        # Adjust layout and add main title
+        plt.suptitle(f'Wealth Distribution Analysis at t = {self.t}\nPopulation Size: {self.n_individuals}', fontsize=11)
+        plt.tight_layout()
+        
+        # Save plot with human-readable timestamp
         os.makedirs('experiments/markets_ys', exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        plt.savefig(f'experiments/markets_ys/lorenz_curve_t{self.t}_{timestamp}.jpg')
+        timestamp = datetime.datetime.now().strftime("%H:%M_%B_%d") 
+        plt.savefig(f'experiments/markets_ys/wdist_{timestamp}.jpg')
+        
+        # Show plot
+        plt.show()
+        
+        # Close the figure to free memory
         plt.close()
