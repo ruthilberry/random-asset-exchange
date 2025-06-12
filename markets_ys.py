@@ -94,7 +94,7 @@ class Population:
     - stocksA: number of stocks owned in company A
     - savings_rates: fraction of wealth they save (s)
     - min_stock_frac: minimum fraction of stocks they must keep
-    - lambda_risk: risk aversion parameter for trading decisions
+    - edge: edge parameter for trading decisions
     
     Attributes are stored in NumPy arrays for efficient operations.
     """
@@ -105,7 +105,7 @@ class Population:
         initial_stocksA: Union[int, np.ndarray] = 1000,
         savings_rates: Union[float, np.ndarray] = 0.99,
         min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction
-        lambda_risk: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
+        edge: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
     ):
         self.n_individuals = n_individuals
         
@@ -113,7 +113,7 @@ class Population:
         self.stocksA = np.asarray(self._initialize_array(initial_stocksA, "initial_stocksA"), dtype=int)
         self.savings_rates = self._initialize_array(savings_rates, "savings_rates")
         self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
-        self.lambda_risk = self._initialize_array(lambda_risk, "lambda_risk")
+        self.edge = self._initialize_array(edge, "edge")
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
         """Helper method to initialize arrays from scalar or array inputs."""
@@ -165,7 +165,7 @@ class Economy:
         money_tax_rate: float = 0.0015,  # tax on liquid money, default 0.15%
         stock_tax_rate: float = 0.0,  # tax on stock wealth (currently not working)
         min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction (currently not working)
-        lambda_risk: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
+        edge: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
         markets_enabled: bool = True,  # whether to enable stock trading
     ):
         self.population = Population(
@@ -174,7 +174,7 @@ class Economy:
             initial_stocksA=initial_stocksA,
             savings_rates=savings_rates,
             min_stock_frac=min_stock_frac,
-            lambda_risk=lambda_risk
+            edge=edge
         )
         self.n_individuals = n_individuals
         self.trading_limits = self._initialize_array(trading_limits, "trading_limits")
@@ -188,7 +188,7 @@ class Economy:
         self.money_tax_rate = money_tax_rate
         self.stock_tax_rate = stock_tax_rate
         self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
-        self.lambda_risk = self._initialize_array(lambda_risk, "lambda_risk")
+        self.edge = self._initialize_array(edge, "edge")
         self.markets_enabled = markets_enabled
         self.order_book = OrderBook() if markets_enabled else None
         
@@ -232,10 +232,8 @@ class Economy:
         # this way some fraction of individuals will wrongly estimate the value
 
         # Multiply by the error factor and the risk aversion factor
-        self.share_prices = EV * (1 - self.population.lambda_risk) * f
-        assert np.all(self.share_prices > 0), f"""All share prices must 
-        be strictly positive at time step {self.t}, previous revenue per share: {self.prev_revenue/self.total_stocksA}, error factor: {np.min(f)}, EV: {EV}"""
-
+        self.share_prices = EV * f
+ 
     def _compute_trade_limits(self) -> None:
         """Compute the trade limits for each agent.
             Note that each agent can perform (at most) that value of buy orders and that same value of sell orders. """
@@ -384,7 +382,7 @@ p: {self.p}
 money_tax_rate: {self.money_tax_rate}
 stock_tax_rate: {self.stock_tax_rate}
 min_stock_frac: {format_array_param(self.min_stock_frac)}
-lambda_risk: {format_array_param(self.lambda_risk)}
+edge: {format_array_param(self.edge)}
 Gini coefficient: {gini:.3f}"""
         
         # Plot parameters in first subplot
