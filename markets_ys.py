@@ -431,3 +431,50 @@ Gini coefficient: {gini:.3f}"""
         
         # Close the figure to free memory
         plt.close()
+
+        
+    def document_lorenz_curve(self) -> None:
+        """Plot and store Lorenz curve of total wealth
+        """
+        # Compute wealth components
+        stock_value = self.prev_revenue / self.total_stocksA / self.r
+        money = self.population.money
+        stocks = self.population.stocksA
+        total_wealth = money + stock_value * stocks
+
+        
+        # Compute Lorenz curve
+        sorted_wealth = np.sort(total_wealth)
+        cumulative_wealth = np.cumsum(sorted_wealth) / np.sum(sorted_wealth)
+        population_shares = np.arange(1, len(total_wealth) + 1) / len(total_wealth)
+        
+        # Calculate Gini coefficient
+        gini = 1 - 2 * np.trapezoid(cumulative_wealth, population_shares)
+
+
+        # Create figure with 2x2 subplots
+        fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))
+
+        # Plot Lorenz curve in second subplot
+        ax.plot(population_shares, cumulative_wealth, 'b-', label='Lorenz Curve')
+        ax.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
+        ax.set_title(f'Lorenz Curve (Gini = {gini:.3f})', fontsize=20)
+        ax.set_xlabel('Cumulative Population Share', fontsize=20)
+        ax.set_ylabel('Cumulative Wealth Share', fontsize=20)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=20)
+        ax.tick_params(axis='both', which='major', labelsize=20)
+
+        # Adjust layout and add main title
+        plt.tight_layout()
+        
+        # Save plot with human-readable timestamp
+        os.makedirs('experiments/markets_ys', exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%H:%M_%B_%d") 
+        plt.savefig(f'experiments/markets_ys/lorenz_{timestamp}.jpg')
+        
+        # Show plot
+        plt.show()
+        
+        # Close the figure to free memory
+        plt.close()

@@ -176,9 +176,9 @@ def test_steady_state_hypothesis():
 
 def test_wealth_distribution():
     """Run the economy and plot the wealth distribution."""
-    economy = Economy(n_individuals=100, markets_enabled=True, money_tax_rate=0.0015, stock_tax_rate=0.0)  # Use default parameters
-    economy.run(n_steps=8000)
-    economy.document_wealth_distribution()
+    economy = Economy(n_individuals=1000, markets_enabled=True, money_tax_rate=0.0015, stock_tax_rate=0.0)  # Use default parameters
+    economy.run(n_steps=24000)
+    economy.document_lorenz_curve()
 
 if __name__ == "__main__":
     # Run unit tests
