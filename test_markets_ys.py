@@ -175,43 +175,63 @@ def test_steady_state_hypothesis():
 def test_wealth_distribution():
     """Run the economy and plot the wealth distribution."""
     economy = Economy(n_individuals=1000, markets_enabled=True, 
-                      money_tax_rate=0.0015, min_stock_prudency=1)
+                      money_tax_rate=0.000, min_stock_prudency=0)
     
     # Lists to store Lorenz curve data at specific time steps
-    lorenz_times = [2000, 4000, 6000, 8000]
+    lorenz_times = [100, 200, 400, 800, 1600]
     lorenz_data = [] # Will store (gini, population_shares, cumulative_wealth) for each time
     
     # Run the economy for 8000 steps
-    for t in range(8000):
+    for t in range(1600):
         economy.step()
         if t + 1 in lorenz_times: # Check if current step is one of the target times
             gini, pop_shares, cum_wealth = economy.document_lorenz_curve()
             lorenz_data.append((gini, pop_shares, cum_wealth))
     
     # Create a figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    plt.rcParams['figure.dpi'] = 70  # Add this before creating the figure
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10,5))
     
     # Plot Gini coefficient history on the left subplot
-    ax1.plot(economy.gini_history, 'b-')
-    ax1.set_title('Gini Coefficient Over Time', fontsize=12)
-    ax1.set_xlabel('Time Step', fontsize=12)
-    ax1.set_ylabel('Gini Coefficient', fontsize=12)
+    ax1.plot(economy.gini_history, 'b-', alpha=0.5)  # Make the line slightly transparent
+    # Add colored points at the times where we plot Lorenz curves
+    colors = ['m', 'b', 'g', 'r', 'c'] # Colors for different time steps
+    for i, t in enumerate(lorenz_times):
+        ax1.plot(t-1, economy.gini_history[t-1], 'o', color=colors[i], markersize=8)
+    ax1.set_title('Gini Coefficient', fontsize=18)
+    ax1.set_xlabel('Time Step', fontsize=18)
+    ax1.set_ylabel('Gini Coefficient', fontsize=18)
+    ax1.tick_params(axis='both', which='major', labelsize=18)
     ax1.grid(True, alpha=0.3)
     
+    ax2.plot([0, 1], [0, 1], 'k--', label='Equality')
     # Plot Lorenz curves on the right subplot
-    colors = ['b', 'g', 'r', 'c'] # Colors for different time steps
     for i, (gini, pop_shares, cum_wealth) in enumerate(lorenz_data):
-        ax2.plot(pop_shares, cum_wealth, colors[i], label=f't={lorenz_times[i]} (Gini={gini:.3f})')
+        ax2.plot(pop_shares, cum_wealth, colors[i], label=f't={lorenz_times[i]}')
     
-    ax2.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
-    ax2.set_title('Lorenz Curves at Different Time Steps', fontsize=12)
-    ax2.set_xlabel('Cumulative Population Share', fontsize=12)
-    ax2.set_ylabel('Cumulative Wealth Share', fontsize=12)
+    ax2.set_title('Lorenz Curve', fontsize=18)
+    ax2.set_xlabel('Cum. Population Share', fontsize=18)
+    ax2.set_ylabel('Cum. Wealth Share', fontsize=18)
+    ax2.yaxis.set_label_position('right')
+    ax2.yaxis.tick_right()
+    ax2.tick_params(axis='both', which='major', labelsize=18)
     ax2.grid(True, alpha=0.3)
-    ax2.legend(fontsize=10)
+    ax2.legend(fontsize=15)
     
     plt.tight_layout()
     plt.show() # Show the plot
+    
+    # Ask user if they want to save the plot
+    # save_plot = input("Do you want to save this plot? (y/n): ").lower().strip()
+    # if save_plot == 'y':
+    #     # Create directory if it doesn't exist
+    #     os.makedirs('experiments/markets_ys', exist_ok=True)
+    #     # Generate timestamp for filename
+    #     timestamp = datetime.datetime.now().strftime("%H:%M_%B_%d")
+    #     # Save the plot
+    #     plt.savefig(f'experiments/markets_ys/wealth_dist_{timestamp}.jpg')
+    #     print(f"Plot saved as 'experiments/markets_ys/wealth_dist_{timestamp}.jpg'")
+    
     plt.close() # Close the figure to free memory
 
 if __name__ == "__main__":
