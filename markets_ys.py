@@ -12,8 +12,8 @@ class Order:
     """Represents a buy or sell order in the market."""
     agent_id: int
     price: float
-    order_id: int
-    quantity: int = 1  # Default to 1 stock per order
+    order_id: int # in practice its a time stamp
+    quantity: int
 
     def __lt__(self, other):
         # For buy orders: higher price first, then earlier order_id
@@ -93,7 +93,7 @@ class Population:
     - money: their current wealth
     - stocksA: number of stocks owned in company A
     - savings_rates: fraction of wealth they save (s)
-    - min_stock_frac: minimum fraction of stocks they must keep
+    - min_stock_prudency: minimum fraction of stocks they must keep
     - edge: edge parameter for trading decisions
     
     Attributes are stored in NumPy arrays for efficient operations.
@@ -104,7 +104,7 @@ class Population:
         initial_money: Union[float, np.ndarray] = 1.0,
         initial_stocksA: Union[int, np.ndarray] = 1000,
         savings_rates: Union[float, np.ndarray] = 0.99,
-        min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction
+        min_stock_prudency: Union[int, np.ndarray] = 1,  # minimum stocks held
         edge: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
     ):
         self.n_individuals = n_individuals
@@ -112,7 +112,7 @@ class Population:
         self.money = self._initialize_array(initial_money, "initial_money")
         self.stocksA = np.asarray(self._initialize_array(initial_stocksA, "initial_stocksA"), dtype=int)
         self.savings_rates = self._initialize_array(savings_rates, "savings_rates")
-        self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
+        self.min_stock_prudency = np.asarray(self._initialize_array(min_stock_prudency, "min_stock_prudency"), dtype=int)
         self.edge = self._initialize_array(edge, "edge")
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
@@ -135,7 +135,7 @@ class Economy:
     4. Time evolution through discrete steps
     5. Wealth taxation and redistribution
     
-    Attributes:
+    Attributes (to be updated):
         population: The population of agents
         total_money: Total money in the economy
         total_stocksA: Total number of stocks in company A
@@ -158,14 +158,14 @@ class Economy:
         initial_money: Union[float, np.ndarray] = 1.0,
         initial_stocksA: Union[int, np.ndarray] = 1000,
         savings_rates: Union[float, np.ndarray] = 0.99,
-        trading_limits: Union[float, np.ndarray] = 0.05,
+        trading_limits: Union[float, np.ndarray] = 0.20, #  default 20% of wealth
         r: float = 0.1, # intertemporal discount rate
         E: float = 0.2, # error std deviation
         p: float = 0.01, # error probability
         money_tax_rate: float = 0.0015,  # tax on liquid money, default 0.15%
         stock_tax_rate: float = 0.0,  # tax on stock wealth (currently not working)
-        min_stock_frac: Union[float, np.ndarray] = 0.0,  # minimum stock fraction (currently not working)
-        edge: Union[float, np.ndarray] = 0.0,   # risk aversion parameter
+        min_stock_prudency: Union[int, np.ndarray] = 1,  # minimum number of stocks held
+        edge: Union[float, np.ndarray] = 0.01,   # edge parameter
         markets_enabled: bool = True,  # whether to enable stock trading
     ):
         self.population = Population(
@@ -173,7 +173,7 @@ class Economy:
             initial_money=initial_money,
             initial_stocksA=initial_stocksA,
             savings_rates=savings_rates,
-            min_stock_frac=min_stock_frac,
+            min_stock_prudency=min_stock_prudency,
             edge=edge
         )
         self.n_individuals = n_individuals
@@ -187,14 +187,14 @@ class Economy:
         self.p = p
         self.money_tax_rate = money_tax_rate
         self.stock_tax_rate = stock_tax_rate
-        self.min_stock_frac = self._initialize_array(min_stock_frac, "min_stock_frac")
-        self.edge = self._initialize_array(edge, "edge")
         self.markets_enabled = markets_enabled
         self.order_book = OrderBook() if markets_enabled else None
         
         # Store initial values for parameter documentation
         self.initial_money = initial_money
         self.initial_stocksA = initial_stocksA
+        self.gini_history = []
+        self.prev_revenue = 0.0
 
     def _initialize_array(self, value: Union[float, np.ndarray], name: str) -> np.ndarray:
         """Helper method to initialize arrays from scalar or array inputs."""
@@ -230,8 +230,6 @@ class Economy:
         f += np.random.binomial(1, self.p, size=self.n_individuals) * np.random.normal(0, self.E, size=self.n_individuals)
         f = np.clip(f, 0.1, 3) # avoid prices that are too close to zero
         # this way some fraction of individuals will wrongly estimate the value
-
-        # Multiply by the error factor and the risk aversion factor
         self.share_prices = EV * f
  
     def _compute_trade_limits(self) -> None:
@@ -245,49 +243,55 @@ class Economy:
 
         # choose random permutation to add orders to order book
         order_indices = np.random.permutation(2*self.n_individuals)
-
-        eps = 1e-14 # small deviation to avoid equal buy and sell price
         
         for i in order_indices:
             if i < self.n_individuals:
-                # buy order
-                p = self.share_prices[i]*(1-eps) # multiply by 1-eps to avoid all buy and sell values being the same
+                # wants to buy
+                p = self.share_prices[i]*(1-self.population.edge[i]) # we take into account the edge requirement
 
                 quant = np.floor(min(self.population.money[i], self.max_money_to_trade[i])/p)
                 quant = min(quant, self.total_stocksA)
-                if quant == 0:
-                    continue
-                self.order_book.add_buy_order(i, p*(1-eps), int(quant))
-            else:
-                # sell order
-                idx = i - self.n_individuals
-                p = self.share_prices[idx]* (1 + eps) # multiply by 1+eps to avoid all buy and sell values being the same
-
-                quant = np.floor(min(self.population.stocksA[idx], self.max_money_to_trade[idx]/p))
-
-                # Apply portfolio reserve rule
-                # TODO: Apply portfolio reserve rule
-
-                if quant == 0:
-                    continue
-                self.order_book.add_sell_order(idx, p*(1+eps), int(quant))
-            
-            # perform a trade if appropriate
-            if self.order_book.get_best_buy() and self.order_book.get_best_sell():
-                if self.order_book.get_best_buy().price >= self.order_book.get_best_sell().price:
-                    # perform a trade
+                
+                # we perform all possible calls
+                while self.order_book.get_best_sell() and p > self.order_book.get_best_sell().price and quant > 0:
                     sell_order = self.order_book.get_best_sell()
-                    buy_order = self.order_book.get_best_buy()
-                    q = min(sell_order.quantity, buy_order.quantity)
-                    p = (sell_order.price + buy_order.price)/2
+                    q = min(quant, sell_order.quantity)
                     self.population.money[sell_order.agent_id] += p*q
-                    self.population.money[buy_order.agent_id] -= p*q
+                    self.population.money[i] -= p*q
                     self.population.stocksA[sell_order.agent_id] -= q
-                    self.population.stocksA[buy_order.agent_id] += q
-                    # Fill orders partially
+                    self.population.stocksA[i] += q
                     self.order_book.fill_partially_best_sell(q)
+                    quant -= q
+                
+                if quant == 0:
+                    continue
+
+                self.order_book.add_buy_order(i, p, int(quant))
+            else:
+                # wants to sell
+                idx = i - self.n_individuals
+                p = self.share_prices[idx]* (1 + self.population.edge[idx]) # we take into account the edge requirement
+
+                quant = np.floor(min(self.population.stocksA[idx]-self.population.min_stock_prudency[idx], self.max_money_to_trade[idx]/p))
+
+                # we perform all possible calls
+                while self.order_book.get_best_buy() and p < self.order_book.get_best_buy().price and quant > 0:
+                    buy_order = self.order_book.get_best_buy()
+                    q = min(quant, buy_order.quantity)
+                    self.population.money[buy_order.agent_id] -= p*q
+                    self.population.money[idx] += p*q
+                    self.population.stocksA[buy_order.agent_id] += q
+                    self.population.stocksA[idx] -= q
                     self.order_book.fill_partially_best_buy(q)
+                    quant -= q
+
+                if quant == 0:
+                    continue
+                
+                self.order_book.add_sell_order(idx, p, int(quant))
         
+        # check that the book doesn't have any remaining trades
+        assert not self.order_book.get_best_buy() or not self.order_book.get_best_sell() or self.order_book.get_best_buy().price <= self.order_book.get_best_sell().price, "Buy price is greater than sell price"
         self.order_book.clear()
 
     def _trade_phase(self) -> None:
@@ -307,20 +311,20 @@ class Economy:
         # First apply stock wealth tax
         if self.money_tax_rate == 0.0 and self.stock_tax_rate == 0.0:
             return
-        stock_wealth = self.population.stocksA * self.prev_revenue/self.total_stocksA/self.r # compute stock wealth based on EV
-        stock_tax = stock_wealth * self.stock_tax_rate
+        # stock_wealth = self.population.stocksA * self.prev_revenue/self.total_stocksA/self.r # compute stock wealth based on EV
+        # stock_tax = stock_wealth * self.stock_tax_rate
         
         # Then apply money tax (after dividends)
         money_tax = self.population.money * self.money_tax_rate
         
         # Total tax collection
-        total_tax = stock_tax.sum() + money_tax.sum()
+        total_tax = money_tax.sum()
         
         # Redistribute equally among all agents
         redistribution = total_tax / self.n_individuals
         
         # Apply taxes and redistribution
-        self.population.money += redistribution - money_tax - stock_tax
+        self.population.money += redistribution - money_tax
 
     def step(self) -> None:
         """Perform one step of the economic simulation."""
@@ -328,6 +332,14 @@ class Economy:
         self._pay_dividends()
         self._trade_phase()
         self._apply_taxes()
+        # Calculate and store Gini coefficient at each step
+        stock_value = self.prev_revenue / self.total_stocksA / self.r if self.total_stocksA > 0 else 0.0
+        total_wealth = self.population.money + stock_value * self.population.stocksA
+        sorted_wealth = np.sort(total_wealth)
+        cumulative_wealth = np.cumsum(sorted_wealth) / np.sum(sorted_wealth)
+        population_shares = np.arange(1, len(total_wealth) + 1) / len(total_wealth)
+        gini = 1 - 2 * np.trapezoid(cumulative_wealth, population_shares)
+        self.gini_history.append(gini)
         self.t += 1
 
     def run(self, n_steps: int = 1000) -> None:
@@ -381,8 +393,8 @@ E: {self.E}
 p: {self.p}
 money_tax_rate: {self.money_tax_rate}
 stock_tax_rate: {self.stock_tax_rate}
-min_stock_frac: {format_array_param(self.min_stock_frac)}
-edge: {format_array_param(self.edge)}
+min_stock_prudency: {format_array_param(self.population.min_stock_prudency)}
+edge: {format_array_param(self.population.edge)}
 Gini coefficient: {gini:.3f}"""
         
         # Plot parameters in first subplot
@@ -431,11 +443,12 @@ Gini coefficient: {gini:.3f}"""
         plt.close()
 
         
-    def document_lorenz_curve(self) -> None:
-        """Plot and store Lorenz curve of total wealth
+    def document_lorenz_curve(self) -> (float, np.ndarray, np.ndarray):
+        """Compute Lorenz curve of total wealth and return data.
+        Returns: Gini coefficient, population shares, cumulative wealth.
         """
         # Compute wealth components
-        stock_value = self.prev_revenue / self.total_stocksA / self.r
+        stock_value = self.prev_revenue / self.total_stocksA / self.r if self.total_stocksA > 0 else 0.0
         money = self.population.money
         stocks = self.population.stocksA
         total_wealth = money + stock_value * stocks
@@ -449,30 +462,4 @@ Gini coefficient: {gini:.3f}"""
         # Calculate Gini coefficient
         gini = 1 - 2 * np.trapezoid(cumulative_wealth, population_shares)
 
-
-        # Create figure with 2x2 subplots
-        fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))
-
-        # Plot Lorenz curve in second subplot
-        ax.plot(population_shares, cumulative_wealth, 'b-', label='Lorenz Curve')
-        ax.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
-        ax.set_title(f'Lorenz Curve (Gini = {gini:.3f})', fontsize=20)
-        ax.set_xlabel('Cumulative Population Share', fontsize=20)
-        ax.set_ylabel('Cumulative Wealth Share', fontsize=20)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=20)
-        ax.tick_params(axis='both', which='major', labelsize=20)
-
-        # Adjust layout and add main title
-        plt.tight_layout()
-        
-        # Save plot with human-readable timestamp
-        os.makedirs('experiments/markets_ys', exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%H:%M_%B_%d") 
-        plt.savefig(f'experiments/markets_ys/lorenz_{timestamp}.jpg')
-        
-        # Show plot
-        plt.show()
-        
-        # Close the figure to free memory
-        plt.close()
+        return gini, population_shares, cumulative_wealth

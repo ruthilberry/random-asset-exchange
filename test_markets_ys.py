@@ -47,7 +47,6 @@ class TestEconomy(unittest.TestCase):
     def test_initialization(self):
         """Test basic initialization of Economy class"""
         self.assertEqual(self.economy.total_money, self.n_individuals)
-        self.assertEqual(self.economy.treasury, 0.0)
         self.assertEqual(self.economy.firmA_wealth, 0.0)
         self.assertEqual(self.economy.t, 0)
 
@@ -56,8 +55,7 @@ class TestEconomy(unittest.TestCase):
         initial_total = self.economy.total_money
         self.economy.step()
         final_total = (self.economy.population.money.sum() + 
-                      self.economy.firmA_wealth + 
-                      self.economy.treasury)
+                      self.economy.firmA_wealth)
         self.assertAlmostEqual(initial_total, final_total)
 
     def test_stocks_conservation(self):
@@ -176,13 +174,49 @@ def test_steady_state_hypothesis():
 
 def test_wealth_distribution():
     """Run the economy and plot the wealth distribution."""
-    economy = Economy(n_individuals=1000, markets_enabled=True, money_tax_rate=0.0015, stock_tax_rate=0.0)  # Use default parameters
-    economy.run(n_steps=24000)
-    economy.document_lorenz_curve()
+    economy = Economy(n_individuals=1000, markets_enabled=True, 
+                      money_tax_rate=0.0015, min_stock_prudency=1)
+    
+    # Lists to store Lorenz curve data at specific time steps
+    lorenz_times = [2000, 4000, 6000, 8000]
+    lorenz_data = [] # Will store (gini, population_shares, cumulative_wealth) for each time
+    
+    # Run the economy for 8000 steps
+    for t in range(8000):
+        economy.step()
+        if t + 1 in lorenz_times: # Check if current step is one of the target times
+            gini, pop_shares, cum_wealth = economy.document_lorenz_curve()
+            lorenz_data.append((gini, pop_shares, cum_wealth))
+    
+    # Create a figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot Gini coefficient history on the left subplot
+    ax1.plot(economy.gini_history, 'b-')
+    ax1.set_title('Gini Coefficient Over Time', fontsize=12)
+    ax1.set_xlabel('Time Step', fontsize=12)
+    ax1.set_ylabel('Gini Coefficient', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot Lorenz curves on the right subplot
+    colors = ['b', 'g', 'r', 'c'] # Colors for different time steps
+    for i, (gini, pop_shares, cum_wealth) in enumerate(lorenz_data):
+        ax2.plot(pop_shares, cum_wealth, colors[i], label=f't={lorenz_times[i]} (Gini={gini:.3f})')
+    
+    ax2.plot([0, 1], [0, 1], 'k--', label='Perfect Equality')
+    ax2.set_title('Lorenz Curves at Different Time Steps', fontsize=12)
+    ax2.set_xlabel('Cumulative Population Share', fontsize=12)
+    ax2.set_ylabel('Cumulative Wealth Share', fontsize=12)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=10)
+    
+    plt.tight_layout()
+    plt.show() # Show the plot
+    plt.close() # Close the figure to free memory
 
 if __name__ == "__main__":
     # Run unit tests
-    #unittest.main(argv=['first-arg-is-ignored'], exit=False)
+    # unittest.main(argv=['first-arg-is-ignored'], exit=False)
     
     # Run steady state hypothesis test
     # test_steady_state_hypothesis() 
